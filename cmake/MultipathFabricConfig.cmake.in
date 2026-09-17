@@ -1,0 +1,21 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/MultipathFabricTargets.cmake")
+
+check_required_components(MultipathFabric)
+
+# Fail fast when the documented imported target is absent rather than letting a
+# downstream configure succeed and fail later at link time.
+if(NOT TARGET SummonSoftwareLabs::MultipathFabric)
+  set(MultipathFabric_FOUND FALSE)
+  message(FATAL_ERROR
+    "MultipathFabric package did not export the documented imported target "
+    "SummonSoftwareLabs::MultipathFabric")
+endif()
+
+set(MultipathFabric_LIBRARIES SummonSoftwareLabs::MultipathFabric)
+get_target_property(MultipathFabric_INCLUDE_DIRS
+  SummonSoftwareLabs::MultipathFabric INTERFACE_INCLUDE_DIRECTORIES)
