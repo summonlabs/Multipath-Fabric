@@ -1,8 +1,7 @@
 # Multipath Fabric
 
-**Multipath Fabric 1.0.0** is the simultaneous-path-set governance runtime of the
-Distributed Fabric Infrastructure / Fabric OS stack, published by
-Summon Software Labs as a vendor-neutral C++20 library.
+**Multipath Fabric 1.0.0** is the simultaneous-path-set governance runtime for
+data-center fabric infrastructure, as a vendor-neutral C++20 library.
 
 Its single question is:
 
