@@ -6,7 +6,7 @@ data-center fabric infrastructure, as a vendor-neutral C++20 library.
 Its single question is:
 
 > Which exact paths belong to this governed multipath set right now, which members are
-> currently usable together, under which Path Authority generations and control-plane
+> currently usable together, under which [Path Authority](https://github.com/pngen/Path-Authority) generations and control-plane
 > authority, what minimum usable membership is required, and when must a set or member
 > be rejected, degraded, fenced, withdrawn, superseded, or revalidated?
 
