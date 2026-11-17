@@ -141,7 +141,9 @@ FabricOutcome tcp_listen(const std::string& host, std::uint16_t port, Socket& ou
     Socket probe(handle);
     const int reuse = 1;
 #if defined(_WIN32)
-    ::setsockopt(static_cast<SOCKET>(handle), SOL_SOCKET, SO_REUSEADDR,
+    // SO_REUSEADDR on Windows lets a second socket bind a port that is still
+    // listening; exclusive use makes that second bind fail instead.
+    ::setsockopt(static_cast<SOCKET>(handle), SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
                  reinterpret_cast<const char*>(&reuse), sizeof(reuse));
 #else
     ::setsockopt(handle, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));

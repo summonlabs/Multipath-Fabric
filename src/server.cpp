@@ -140,14 +140,10 @@ void MultipathFabricServer::accept_loop() {
     if (!readable) {
       continue;
     }
-    {
-      std::lock_guard<std::mutex> guard(sessions_mutex_);
-      if (sessions_.size() >= config_.limits.max_sessions) {
-        std::lock_guard<std::mutex> statistics_guard(statistics_mutex_);
-        ++statistics_.sessions_rejected;
-        continue;
-      }
-    }
+    // A connection beyond the session limit is accepted and refused below.
+    // Leaving it in the backlog kept the listener readable, so this loop spun
+    // without waiting and counted a rejection on every pass while the peer was
+    // neither served nor refused.
     net::Socket accepted;
     if (!net::tcp_accept(listener_, accepted).succeeded()) {
       continue;

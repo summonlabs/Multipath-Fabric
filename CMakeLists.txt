@@ -29,8 +29,11 @@ if(MSVC)
   if(MPF_ENABLE_ASAN)
     # Genuine MSVC AddressSanitizer. The runtime DLL is copied next to the
     # executables after the build by the asan-runtime target below.
-    add_compile_options(/fsanitize=address)
-    add_link_options(/fsanitize=address)
+    # Without debug information MSVC reports C5072, which /WX turns into a build
+    # failure in the default Release configuration; /Zi and /DEBUG also give
+    # symbolized reports.
+    add_compile_options(/fsanitize=address /Zi)
+    add_link_options(/fsanitize=address /DEBUG)
   endif()
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 else()

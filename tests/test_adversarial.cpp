@@ -1,6 +1,26 @@
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#if !defined(WIN32_LEAN_AND_MEAN)
+#define WIN32_LEAN_AND_MEAN
+#endif
+#if !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 #include "multipath_fabric/multipath_fabric.hpp"
 #include "test_support.hpp"
@@ -279,4 +299,115 @@ MPF_TEST(adversarial_diff_and_history_are_deterministic_under_churn) {
     MPF_CHECK(snapshot->digest.to_hex() != previous_digest);
     previous_digest = snapshot->digest.to_hex();
   }
+}
+
+namespace {
+
+#if defined(_WIN32)
+using RawHandle = SOCKET;
+constexpr RawHandle kNoRawHandle = INVALID_SOCKET;
+void close_raw(RawHandle handle) { ::closesocket(handle); }
+int select_width(RawHandle) { return 0; }
+#else
+using RawHandle = int;
+constexpr RawHandle kNoRawHandle = -1;
+void close_raw(RawHandle handle) { ::close(handle); }
+int select_width(RawHandle handle) { return handle + 1; }
+#endif
+
+// A loopback connection that only observes what the server does with it. The
+// server under test has initialised the socket library already.
+class RawPeer {
+ public:
+  explicit RawPeer(std::uint16_t port) {
+    handle_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    connected_ = handle_ != kNoRawHandle &&
+                 ::connect(handle_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0;
+  }
+  ~RawPeer() {
+    if (handle_ != kNoRawHandle) {
+      close_raw(handle_);
+    }
+  }
+  RawPeer(const RawPeer&) = delete;
+  RawPeer& operator=(const RawPeer&) = delete;
+
+  bool connected() const { return connected_; }
+
+  // True when the server closes the connection without sending anything before
+  // the bound passes; false when it sends data or the bound passes first.
+  bool closed_by_server_within(std::chrono::milliseconds bound) {
+    fd_set read_set;
+    FD_ZERO(&read_set);
+    FD_SET(handle_, &read_set);
+    timeval wait{};
+    wait.tv_sec = static_cast<long>(bound.count() / 1000);
+    wait.tv_usec = static_cast<long>((bound.count() % 1000) * 1000);
+    if (::select(select_width(handle_), &read_set, nullptr, nullptr, &wait) <= 0) {
+      return false;
+    }
+    char byte = 0;
+    return ::recv(handle_, &byte, 1, 0) <= 0;
+  }
+
+ private:
+  RawHandle handle_ = kNoRawHandle;
+  bool connected_ = false;
+};
+
+template <typename Predicate>
+bool holds_within(Predicate predicate, std::chrono::milliseconds bound) {
+  const auto deadline = std::chrono::steady_clock::now() + bound;
+  while (!predicate()) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+    std::this_thread::yield();
+  }
+  return true;
+}
+
+}  // namespace
+
+MPF_TEST(adversarial_a_connection_beyond_the_session_limit_is_refused) {
+  multipath_fabric::FabricEngine engine;
+  multipath_fabric::ServerConfig config;
+  config.limits.max_sessions = 1;
+  multipath_fabric::MultipathFabricServer server(engine, config);
+  const multipath_fabric::FabricOutcome started = server.start();
+  MPF_REQUIRE(started.succeeded());
+  // The only session slot is taken and stays taken.
+  RawPeer first(server.port());
+  MPF_REQUIRE(first.connected());
+  const bool admitted = holds_within([&server]() { return server.active_sessions() == 1; },
+                                     std::chrono::milliseconds(10000));
+  MPF_REQUIRE(admitted);
+  // A connection beyond the limit is refused: the server closes it without a
+  // greeting instead of leaving it waiting in the backlog.
+  RawPeer second(server.port());
+  MPF_REQUIRE(second.connected());
+  MPF_CHECK(second.closed_by_server_within(std::chrono::milliseconds(5000)));
+  // That one refusal is counted once, not on every pass of the accept loop.
+  MPF_CHECK_EQ(server.statistics().sessions_rejected, std::uint64_t{1});
+  MPF_CHECK_EQ(server.active_sessions(), std::size_t{1});
+  server.stop();
+}
+
+MPF_TEST(adversarial_a_second_server_cannot_take_a_listening_port) {
+  multipath_fabric::FabricEngine engine;
+  multipath_fabric::MultipathFabricServer first(engine, multipath_fabric::ServerConfig{});
+  const multipath_fabric::FabricOutcome first_started = first.start();
+  MPF_REQUIRE(first_started.succeeded());
+  multipath_fabric::ServerConfig config;
+  config.port = first.port();
+  multipath_fabric::MultipathFabricServer second(engine, config);
+  // Two servers must never share one listening port: the second start fails.
+  const multipath_fabric::FabricOutcome second_started = second.start();
+  MPF_CHECK(!second_started.succeeded());
+  second.stop();
+  first.stop();
 }
